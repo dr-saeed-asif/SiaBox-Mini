@@ -1,0 +1,27 @@
+// Prisma schema for SiaBox Mini
+// SQLite is used for easy local development (no extra database server needed)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// FileObject stores metadata about every uploaded file.
+// The actual file bytes live in storage (local folder or Sia S3 bucket).
+model FileObject {
+  id              String   @id @default(cuid())
+  originalName    String
+  mimeType        String
+  sizeBytes       Int
+  sha256Hash      String
+  storageProvider String   // "local" or "sia"
+  bucket          String
+  objectKey       String   @unique
+  status          String   @default("active") // active | deleted
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+}

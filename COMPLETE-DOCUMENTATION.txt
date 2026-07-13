@@ -1,0 +1,1054 @@
+================================================================================
+  SiaBox Mini — Complete A-to-Z Documentation
+  Simple Decentralized File Storage App
+================================================================================
+
+Table of Contents
+-----------------
+  1.  What Is SiaBox Mini?
+  2.  What Problem Does It Solve?
+  3.  Tech Stack
+  4.  High-Level Architecture
+  5.  Project Folder Structure (Every File Explained)
+  6.  How the App Starts (Boot Sequence)
+  7.  Environment Variables
+  8.  Database (Prisma + SQLite)
+  9.  Storage Abstraction Layer
+  10. Local Storage Mode (How It Works)
+  11. Sia Storage Mode (How It Works)
+  12. Complete Upload Flow (Step by Step)
+  13. Complete List Files Flow
+  14. Complete Download Flow
+  15. Complete Delete Flow
+  16. Complete Verify (Hash) Flow
+  17. Storage Health Check Flow
+  18. Frontend Pages Explained
+  19. Frontend Components Explained
+  20. Backend API Routes Explained
+  21. Backend Services Explained
+  22. Utilities and Validators
+  23. Request / Response Format
+  24. Security Rules
+  25. Switching Between Local and Sia Mode
+  26. renterd Setup Summary (For Sia Mode)
+  27. Common Errors and Fixes
+  28. Mental Model for Beginners
+  29. Quick Command Reference
+
+
+================================================================================
+1. WHAT IS SiaBox Mini?
+================================================================================
+
+SiaBox Mini is a beginner-friendly full-stack web application that teaches
+how file storage works using a clean abstraction layer. You can:
+
+  - Upload files
+  - List uploaded files
+  - Download files
+  - Delete files
+  - Verify file integrity using SHA-256 hash
+
+The app stores file METADATA in a SQLite database and stores actual FILE BYTES
+in a storage backend. The backend can be:
+
+  - Local disk (for learning, no extra setup)
+  - Sia decentralized network via renterd S3 API (real decentralized storage)
+
+The frontend never talks to Sia directly. It only talks to Next.js API routes.
+The API routes never talk to disk or S3 directly. They use FileService, which
+uses StorageService, which picks the correct StorageProvider.
+
+
+================================================================================
+2. WHAT PROBLEM DOES IT SOLVE?
+================================================================================
+
+Beginners often struggle to understand:
+
+  - How a web upload actually works end-to-end
+  - Where file bytes go vs where metadata goes
+  - How to swap local storage for cloud/decentralized storage
+  - How to verify a file was not corrupted after storage
+
+SiaBox Mini solves this by keeping the code simple and separating concerns:
+
+  UI  -->  API  -->  FileService  -->  StorageService  -->  Provider
+
+This means you can learn each layer independently and switch storage backends
+with one environment variable change.
+
+
+================================================================================
+3. TECH STACK
+================================================================================
+
+Frontend:
+  - Next.js 15 (App Router)
+  - React 19
+  - TypeScript
+  - Tailwind CSS
+
+Backend (inside Next.js):
+  - Next.js API Routes (Route Handlers)
+  - FileService (business logic)
+  - StorageService (storage abstraction)
+
+Database:
+  - Prisma ORM
+  - SQLite (file: ./prisma/dev.db)
+
+Storage Backends:
+  - LocalProvider   → files saved to ./storage/uploads
+  - SiaS3Provider   → files saved via renterd S3-compatible API
+  - AWS SDK (@aws-sdk/client-s3) for Sia S3 integration
+
+Other:
+  - SHA-256 hashing (Node.js crypto module)
+  - Zod-style validation (custom validator in file.schema.ts)
+
+
+================================================================================
+4. HIGH-LEVEL ARCHITECTURE
+================================================================================
+
+                         +-------------------+
+                         |   Browser (UI)    |
+                         |  React Components |
+                         +---------+---------+
+                                   |
+                          HTTP fetch / form POST
+                                   |
+                         +---------v---------+
+                         |  Next.js API      |
+                         |  Route Handlers   |
+                         |  (thin layer)     |
+                         +---------+---------+
+                                   |
+                         +---------v---------+
+                         |   FileService     |
+                         | (business logic)  |
+                         +----+---------+----+
+                              |         |
+                    +---------+         +---------+
+                    |                             |
+           +--------v--------+           +--------v--------+
+           | Prisma + SQLite |           | StorageService  |
+           | (metadata only) |           | (file bytes)    |
+           +-----------------+           +--------+--------+
+                                                  |
+                                    +-------------+-------------+
+                                    |                           |
+                           +--------v--------+         +--------v--------+
+                           | LocalProvider   |         | SiaS3Provider   |
+                           | ./storage/      |         | renterd :8080   |
+                           | uploads/        |         | S3 API          |
+                           +-----------------+         +-----------------+
+
+
+KEY RULE:
+  The UI and API routes NEVER know whether files are on disk or on Sia.
+  Only StorageService decides that based on STORAGE_PROVIDER env variable.
+
+
+================================================================================
+5. PROJECT FOLDER STRUCTURE (EVERY FILE EXPLAINED)
+================================================================================
+
+SiaBox-Mini/
+|
+|-- app/                              Next.js App Router (pages + API)
+|   |-- layout.tsx                    Root layout: header, nav, footer
+|   |-- page.tsx                      Home page with app explanation
+|   |-- globals.css                   Tailwind CSS imports and base styles
+|   |-- upload/
+|   |   |-- page.tsx                  Upload page (uses FileUploadForm)
+|   |-- files/
+|   |   |-- page.tsx                  Files list page (uses FileTable)
+|   |-- api/
+|       |-- files/
+|       |   |-- route.ts              GET  /api/files         (list files)
+|       |   |-- upload/
+|       |   |   |-- route.ts          POST /api/files/upload   (upload file)
+|       |   |-- [fileId]/
+|       |       |-- route.ts          DELETE /api/files/[id]   (delete file)
+|       |       |-- download/
+|       |       |   |-- route.ts      GET  /api/files/[id]/download
+|       |       |-- verify/
+|       |           |-- route.ts      POST /api/files/[id]/verify
+|       |-- storage/
+|           |-- health/
+|               |-- route.ts          GET  /api/storage/health
+|
+|-- components/                       React client components
+|   |-- file-upload-form.tsx          File picker + upload button + messages
+|   |-- file-table.tsx                Table showing all uploaded files
+|   |-- file-actions.tsx              Download / Verify / Delete buttons
+|   |-- storage-status-card.tsx       Live storage health indicator
+|
+|-- server/                           Backend logic (never imported by browser)
+|   |-- db/
+|   |   |-- prisma.ts                 Prisma client singleton
+|   |-- services/
+|   |   |-- file.service.ts           All file business logic
+|   |   |-- storage/
+|   |       |-- storage.interface.ts  StorageProvider contract (interface)
+|   |       |-- storage.service.ts  Picks local or sia provider
+|   |       |-- local.provider.ts   Saves files to disk
+|   |       |-- sia-s3.provider.ts    Saves files via renterd S3 API
+|   |-- utils/
+|   |   |-- hash.ts                   SHA-256 helper
+|   |   |-- response.ts               JSON success/error response helpers
+|   |-- validators/
+|       |-- file.schema.ts            Upload size + file type validation
+|
+|-- prisma/
+|   |-- schema.prisma                 Database model definition
+|   |-- dev.db                        SQLite database file (auto-created)
+|   |-- migrations/                   Database migration history
+|
+|-- storage/
+|   |-- uploads/                      Local mode: actual file bytes stored here
+|       |-- .gitkeep
+|
+|-- .env                                Prisma CLI reads DATABASE_URL from here
+|-- .env.local                          Next.js runtime config (copy from .env.example)
+|-- .env.example                        Template for all environment variables
+|-- package.json                        Dependencies and npm scripts
+|-- README.md                           Quick start guide
+|-- COMPLETE-DOCUMENTATION.txt          This file
+
+
+================================================================================
+6. HOW THE APP STARTS (BOOT SEQUENCE)
+================================================================================
+
+Step 1: You run the dev server
+  Command:  npm run dev
+  Result:   Next.js starts on http://localhost:3000 (or next available port)
+
+Step 2: Next.js loads environment variables
+  Reads:    .env.local and .env
+  Uses:     STORAGE_PROVIDER, DATABASE_URL, SIA_S3_*, etc.
+
+Step 3: Prisma client initializes (on first DB access)
+  File:     server/db/prisma.ts
+  Connects: SQLite database at prisma/dev.db
+
+Step 4: StorageService initializes (on first storage operation)
+  File:     server/services/storage/storage.service.ts
+  Reads:    process.env.STORAGE_PROVIDER
+  Creates:  LocalProvider OR SiaS3Provider (singleton, created once)
+
+Step 5: User opens browser
+  Home page loads → StorageStatusCard calls GET /api/storage/health
+  Shows:   "Storage: local Online" or "Storage: sia Online"
+
+
+================================================================================
+7. ENVIRONMENT VARIABLES
+================================================================================
+
+File: .env.local (for Next.js runtime)
+File: .env      (for Prisma CLI migrations — needs DATABASE_URL only)
+
+Variable                  Purpose
+------------------------  --------------------------------------------------
+APP_NAME                  Display name in browser title and header
+APP_URL                   Base URL of the app (http://localhost:3000)
+DATABASE_URL              SQLite path: file:./dev.db
+STORAGE_PROVIDER          "local" or "sia" — picks storage backend
+LOCAL_STORAGE_PATH        Folder for local file storage (./storage/uploads)
+SIA_S3_ENDPOINT           renterd S3 API URL (http://127.0.0.1:8080)
+SIA_S3_REGION             AWS region string (us-east-1 — required by SDK)
+SIA_S3_ACCESS_KEY         S3 access key from renterd config wizard
+SIA_S3_SECRET_KEY         S3 secret key from renterd config wizard
+SIA_S3_BUCKET             S3 bucket name (siabox-mini)
+SIA_S3_FORCE_PATH_STYLE   "true" — required for renterd S3 compatibility
+MAX_UPLOAD_SIZE_MB        Max file size allowed (default: 50 MB)
+ALLOWED_FILE_TYPES        Comma-separated extensions: pdf,png,jpg,etc.
+
+IMPORTANT:
+  - Sia credentials (SIA_S3_ACCESS_KEY, SIA_S3_SECRET_KEY) are SERVER ONLY.
+  - They are NEVER sent to the browser or included in frontend code.
+
+
+================================================================================
+8. DATABASE (PRISMA + SQLITE)
+================================================================================
+
+File: prisma/schema.prisma
+
+Model: FileObject
+-----------------
+The database stores METADATA about files, NOT the actual file bytes.
+
+Field             Type      Description
+----------------  --------  -----------------------------------------------
+id                String    Unique ID (cuid), primary key
+originalName      String    Original filename from user (e.g. "photo.jpg")
+mimeType          String    MIME type (e.g. "image/jpeg")
+sizeBytes         Int       File size in bytes
+sha256Hash        String    SHA-256 hash computed at upload time
+storageProvider   String    "local" or "sia" — which backend stored it
+bucket            String    Storage bucket name ("local" or "siabox-mini")
+objectKey         String    Unique key/path in storage (UUID + extension)
+status            String    "active" or "deleted" (soft delete)
+createdAt         DateTime  When file was uploaded
+updatedAt         DateTime  Last update time
+
+Why two storage locations?
+  - Database  → fast queries (list files, search by ID, show metadata)
+  - Storage   → actual file bytes (can be disk or Sia network)
+
+Example record after uploading "report.pdf":
+  {
+    id:              "cmxxx123",
+    originalName:    "report.pdf",
+    mimeType:        "application/pdf",
+    sizeBytes:       204800,
+    sha256Hash:      "a3f5b2c1...",
+    storageProvider: "sia",
+    bucket:          "siabox-mini",
+    objectKey:       "71e67c2c-5c45-4f68-b83f-2001b69ec786.pdf",
+    status:          "active",
+    createdAt:       "2026-07-13T10:00:00Z"
+  }
+
+Prisma commands:
+  npx prisma migrate dev --name init   Create/migrate database
+  npx prisma generate                  Regenerate Prisma client
+  npm run db:migrate                   Shortcut for migrate dev
+
+
+================================================================================
+9. STORAGE ABSTRACTION LAYER
+================================================================================
+
+This is the MOST IMPORTANT concept in the project.
+
+File: server/services/storage/storage.interface.ts
+
+The StorageProvider interface defines a contract that every storage backend
+must follow:
+
+  interface StorageProvider {
+    readonly name: string;           // "local" or "sia"
+    uploadFile(input): Promise<...>  // Save file bytes
+    downloadFile(objectKey): Promise<Buffer>  // Read file bytes
+    deleteFile(objectKey): Promise<void>     // Remove file bytes
+    fileExists(objectKey): Promise<boolean>    // Check if file exists
+    checkHealth(): Promise<...>      // Is storage backend reachable?
+  }
+
+Why use an interface?
+  - FileService does not care WHERE files are stored
+  - You can add new providers (AWS S3, Google Cloud, etc.) without changing UI
+  - Switching local ↔ Sia is ONE env variable change
+
+File: server/services/storage/storage.service.ts
+
+StorageService is the factory. It reads STORAGE_PROVIDER and creates the
+correct provider. This is the ONLY file that decides "local" vs "sia".
+
+
+================================================================================
+10. LOCAL STORAGE MODE (HOW IT WORKS)
+================================================================================
+
+Activated when:  STORAGE_PROVIDER=local
+
+File: server/services/storage/local.provider.ts
+
+How files are stored:
+  1. objectKey is generated (e.g. "abc123-uuid.pdf")
+  2. File is written to: ./storage/uploads/abc123-uuid.pdf
+  3. Path traversal attacks are blocked (objectKey cannot contain "..")
+
+Folder structure after uploads:
+  storage/uploads/
+    71e67c2c-5c45-4f68-b83f-2001b69ec786.pdf
+    849b5550-f224-4c24-ae07-aed60d898c4d.png
+    fc19d48f-22d8-48eb-9a99-cb68d2214021.pdf
+
+Health check:
+  - Creates ./storage/uploads folder if missing
+  - Returns: "Local storage ready at /path/to/storage/uploads"
+
+Best for:
+  - Learning the app without any external services
+  - Development and testing
+  - Understanding upload/list/download/delete flow
+
+
+================================================================================
+11. SIA STORAGE MODE (HOW IT WORKS)
+================================================================================
+
+Activated when:  STORAGE_PROVIDER=sia
+
+File: server/services/storage/sia-s3.provider.ts
+
+Requirements:
+  - renterd must be running on your machine
+  - renterd S3 API enabled on port 8080
+  - S3 credentials configured in renterd and .env.local
+  - Wallet funded with Siacoin (SC)
+  - renterd autopilot must form storage contracts with Sia hosts
+
+How files are stored:
+  1. objectKey is generated (e.g. "abc123-uuid.pdf")
+  2. SiaS3Provider uses AWS S3 SDK to call renterd:
+       PutObjectCommand → bucket: "siabox-mini", key: "abc123-uuid.pdf"
+  3. renterd encrypts the file and distributes it across Sia hosts
+  4. Metadata saved to SQLite same as local mode
+
+How SiaS3Provider connects:
+  S3Client({
+    endpoint:     "http://127.0.0.1:8080",   // renterd S3 API
+    region:       "us-east-1",
+    credentials:  { accessKeyId, secretAccessKey },
+    forcePathStyle: true                      // required for renterd
+  })
+
+Health check:
+  - Tries HeadBucket on "siabox-mini"
+  - If bucket missing, tries to auto-create it
+  - Returns: "Connected to Sia S3 bucket siabox-mini"
+
+What happens on Sia network (behind the scenes):
+  1. File is split into 40MB chunks
+  2. Each chunk is erasure-coded into 30 encrypted pieces (shards)
+  3. Each piece goes to a different Sia host worldwide
+  4. Only 10 of 30 pieces needed to rebuild the file (redundancy)
+  5. renterd manages all of this — SiaBox Mini just calls S3 API
+
+
+================================================================================
+12. COMPLETE UPLOAD FLOW (STEP BY STEP)
+================================================================================
+
+USER ACTION: User selects a file and clicks "Upload File" on /upload page
+
+--- FRONTEND ---
+
+Step 1: FileUploadForm component (components/file-upload-form.tsx)
+  - User picks file via <input type="file">
+  - selectedFile state updated with File object
+  - User clicks "Upload File" button
+
+Step 2: handleSubmit() runs
+  - Creates FormData object
+  - Appends file: formData.append("file", selectedFile)
+  - Sends POST request to /api/files/upload
+  - Shows loading state: "Uploading..."
+
+--- NETWORK ---
+
+Step 3: HTTP POST /api/files/upload
+  - Content-Type: multipart/form-data
+  - Body: binary file data
+
+--- BACKEND: API ROUTE ---
+
+Step 4: app/api/files/upload/route.ts
+  - Parses formData: const file = formData.get("file")
+  - Validates file exists and is a File instance
+  - Converts to Buffer: Buffer.from(await file.arrayBuffer())
+  - Calls: getFileService().uploadFile(name, type, buffer)
+  - Returns JSON response
+
+--- BACKEND: FILE SERVICE ---
+
+Step 5: FileService.uploadFile() (server/services/file.service.ts)
+
+  5a. VALIDATE
+      - validateUploadFile(originalName, buffer.length)
+      - Checks: file not empty, size <= MAX_UPLOAD_SIZE_MB, extension allowed
+      - Throws error if validation fails
+
+  5b. HASH
+      - computeSha256(buffer) → hex string
+      - This hash is saved and used later for verification
+
+  5c. GENERATE KEY
+      - objectKey = randomUUID() + file extension
+      - Example: "71e67c2c-5c45-4f68-b83f-2001b69ec786.pdf"
+
+  5d. STORE BYTES
+      - storage.uploadFile({ objectKey, buffer, mimeType })
+      - Goes to LocalProvider or SiaS3Provider depending on env
+
+  5e. SAVE METADATA
+      - prisma.fileObject.create({ ...all fields... })
+      - Saves record to SQLite
+
+  5f. RETURN
+      - Returns { file: FileObject }
+
+--- BACKEND: STORAGE PROVIDER ---
+
+Step 6a (Local mode): LocalProvider.uploadFile()
+  - Writes buffer to ./storage/uploads/{objectKey}
+  - Returns { bucket: "local", objectKey }
+
+Step 6b (Sia mode): SiaS3Provider.uploadFile()
+  - Sends PutObjectCommand to renterd S3 API
+  - renterd stores on Sia network
+  - Returns { bucket: "siabox-mini", objectKey }
+
+--- RESPONSE ---
+
+Step 7: API returns JSON
+  {
+    "success": true,
+    "data": {
+      "id": "cmxxx123",
+      "originalName": "report.pdf",
+      "mimeType": "application/pdf",
+      "sizeBytes": 204800,
+      "sha256Hash": "a3f5b2c1...",
+      "storageProvider": "sia",
+      "bucket": "siabox-mini",
+      "objectKey": "71e67c2c-....pdf",
+      "status": "active",
+      "createdAt": "2026-07-13T10:00:00Z"
+    }
+  }
+
+--- FRONTEND RESPONSE ---
+
+Step 8: FileUploadForm receives response
+  - Shows success message: "report.pdf uploaded successfully!"
+  - After 1.5 seconds, redirects to /files page
+
+
+================================================================================
+13. COMPLETE LIST FILES FLOW
+================================================================================
+
+USER ACTION: User opens /files page or clicks "Refresh"
+
+Step 1: FilesPage component (app/files/page.tsx)
+  - Calls fetch("/api/files") on page load
+  - Shows loading spinner while waiting
+
+Step 2: GET /api/files (app/api/files/route.ts)
+  - Calls getFileService().listFiles()
+  - Returns JSON array of files
+
+Step 3: FileService.listFiles()
+  - prisma.fileObject.findMany({ where: { status: "active" }, orderBy: desc })
+  - Returns all active files, newest first
+
+Step 4: Response
+  {
+    "success": true,
+    "data": [
+      { id, originalName, mimeType, sizeBytes, storageProvider, createdAt, ... },
+      ...
+    ]
+  }
+
+Step 5: FileTable component renders the data
+  - Shows table with: name, size, MIME type, provider, date, actions
+  - Each row has Download / Verify / Delete buttons (FileActions component)
+
+
+================================================================================
+14. COMPLETE DOWNLOAD FLOW
+================================================================================
+
+USER ACTION: User clicks "Download" button on a file row
+
+Step 1: FileActions.handleDownload() (components/file-actions.tsx)
+  - Fetches GET /api/files/{fileId}/download
+  - Receives binary blob response
+  - Creates temporary <a> element with blob URL
+  - Triggers browser download with original filename
+
+Step 2: GET /api/files/[fileId]/download (route.ts)
+  - Extracts fileId from URL params
+  - Calls getFileService().downloadFile(fileId)
+
+Step 3: FileService.downloadFile()
+  3a. Looks up file metadata in database by ID
+  3b. Checks file exists in storage: storage.fileExists(objectKey)
+  3c. Reads bytes: storage.downloadFile(objectKey)
+  3d. Returns { file, buffer }
+
+Step 4: API route returns binary response
+  - Content-Type: file.mimeType
+  - Content-Disposition: attachment; filename="originalName"
+  - Body: raw file bytes
+
+Step 5: Browser saves file to user's Downloads folder
+
+
+================================================================================
+15. COMPLETE DELETE FLOW
+================================================================================
+
+USER ACTION: User clicks "Delete" button and confirms the dialog
+
+Step 1: FileActions.handleDelete()
+  - Shows confirm dialog: 'Delete "filename"? This cannot be undone.'
+  - Sends DELETE /api/files/{fileId}
+
+Step 2: DELETE /api/files/[fileId]/route.ts
+  - Calls getFileService().deleteFile(fileId)
+
+Step 3: FileService.deleteFile()
+  3a. Looks up file in database
+  3b. Deletes bytes from storage: storage.deleteFile(objectKey)
+  3c. Soft-deletes in database: status = "deleted"
+      (record stays in DB but hidden from list)
+
+Step 4: Response
+  { "success": true, "data": { "message": "File deleted successfully." } }
+
+Step 5: FileActions calls onRefresh() → file list reloads
+
+
+================================================================================
+16. COMPLETE VERIFY (HASH) FLOW
+================================================================================
+
+USER ACTION: User clicks "Verify" button on a file row
+
+Purpose: Prove the file in storage is exactly the same as when it was uploaded.
+
+Step 1: FileActions.handleVerify()
+  - Sends POST /api/files/{fileId}/verify
+
+Step 2: POST /api/files/[fileId]/verify/route.ts
+  - Calls getFileService().verifyFile(fileId)
+
+Step 3: FileService.verifyFile()
+  3a. Downloads file from storage (same as download flow)
+  3b. Computes SHA-256 hash of downloaded bytes
+  3c. Compares with sha256Hash stored in database at upload time
+  3d. Returns verified: true/false + both hashes + message
+
+Step 4: Response (success example)
+  {
+    "success": true,
+    "data": {
+      "fileId": "cmxxx123",
+      "originalName": "report.pdf",
+      "storedHash":     "a3f5b2c1d4e5...",
+      "downloadedHash": "a3f5b2c1d4e5...",
+      "verified": true,
+      "message": "File verified successfully. Hash matches — file is intact."
+    }
+  }
+
+Step 5: Verify message shown below the action buttons in the table row
+
+Why SHA-256?
+  - Any change to file bytes (corruption, tampering) changes the hash
+  - If storedHash === downloadedHash, file is 100% intact
+  - This works for both local and Sia storage
+
+
+================================================================================
+17. STORAGE HEALTH CHECK FLOW
+================================================================================
+
+Triggered by: StorageStatusCard on Home, Upload, and Files pages
+
+Step 1: StorageStatusCard mounts (components/storage-status-card.tsx)
+  - Calls GET /api/storage/health on page load
+
+Step 2: GET /api/storage/health/route.ts
+  - Calls getStorageService().checkHealth()
+
+Step 3: Provider-specific health check
+
+  LocalProvider.checkHealth():
+    - Ensures ./storage/uploads folder exists
+    - Returns { provider: "local", healthy: true, message: "..." }
+
+  SiaS3Provider.checkHealth():
+    - Sends HeadBucketCommand to renterd S3 API
+    - Auto-creates bucket if missing
+    - Returns { provider: "sia", healthy: true/false, message: "..." }
+
+Step 4: StorageStatusCard displays result
+  - Green card: storage online
+  - Amber card: storage issue detected
+  - Shows provider name and message
+
+
+================================================================================
+18. FRONTEND PAGES EXPLAINED
+================================================================================
+
+Page: / (Home) — app/page.tsx
+  Purpose:  Welcome page, explains the app
+  Shows:    App description, StorageStatusCard, links to Upload and Files
+  Type:     Server Component (no "use client")
+
+Page: /upload — app/upload/page.tsx
+  Purpose:  Upload a new file
+  Shows:    Explanation text, StorageStatusCard, FileUploadForm
+  Reads:    MAX_UPLOAD_SIZE_MB and ALLOWED_FILE_TYPES from env (server-side)
+  Type:     Server Component wrapping a Client Component
+
+Page: /files — app/files/page.tsx
+  Purpose:  View and manage all uploaded files
+  Shows:    File table with Download/Verify/Delete actions
+  Type:     Client Component ("use client") — needs state for fetch/refresh
+
+
+================================================================================
+19. FRONTEND COMPONENTS EXPLAINED
+================================================================================
+
+Component: FileUploadForm (components/file-upload-form.tsx)
+  Type:     Client Component
+  Props:    allowedTypes, maxSizeMb
+  State:    selectedFile, loading, message
+  Does:     File picker, validation UI, POST to /api/files/upload
+  Shows:    Selected file info, success/error messages, loading button
+
+Component: FileTable (components/file-table.tsx)
+  Type:     Client Component
+  Props:    files[], onRefresh()
+  Does:     Renders table of files with formatted size and date
+  Shows:    Empty state if no files, FileActions in each row
+
+Component: FileActions (components/file-actions.tsx)
+  Type:     Client Component
+  Props:    fileId, fileName, onRefresh()
+  Does:     Download, Verify, Delete API calls
+  Shows:    Three action buttons, verify result message
+
+Component: StorageStatusCard (components/storage-status-card.tsx)
+  Type:     Client Component
+  Does:     Fetches /api/storage/health on mount
+  Shows:    Green/amber status card with provider name and message
+
+
+================================================================================
+20. BACKEND API ROUTES EXPLAINED
+================================================================================
+
+All routes follow the same pattern:
+  1. Parse request
+  2. Call FileService or StorageService
+  3. Return jsonSuccess() or jsonError()
+
+Route                          Method  File                              Action
+-----------------------------  ------  --------------------------------  -----------------
+/api/files                     GET     app/api/files/route.ts            List all files
+/api/files/upload              POST    app/api/files/upload/route.ts     Upload file
+/api/files/[fileId]            DELETE  app/api/files/[fileId]/route.ts   Delete file
+/api/files/[fileId]/download   GET     app/api/files/[fileId]/download/  Download bytes
+/api/files/[fileId]/verify     POST    app/api/files/[fileId]/verify/    Verify hash
+/api/storage/health            GET     app/api/storage/health/route.ts   Storage health
+
+All routes are THIN — they contain no business logic.
+All logic lives in FileService and StorageService.
+
+
+================================================================================
+21. BACKEND SERVICES EXPLAINED
+================================================================================
+
+FileService (server/services/file.service.ts)
+  Role:     All file business logic
+  Methods:
+    listFiles()     → Query active files from DB
+    uploadFile()    → Validate → Hash → Store → Save metadata
+    getFileById()   → Find single file by ID
+    downloadFile()  → Get metadata + read bytes from storage
+    deleteFile()    → Remove from storage + soft-delete in DB
+    verifyFile()    → Download + re-hash + compare
+
+StorageService (server/services/storage/storage.service.ts)
+  Role:     Factory that picks and delegates to the right provider
+  Methods:
+    getProviderName()  → "local" or "sia"
+    uploadFile()       → Delegates to provider
+    downloadFile()     → Delegates to provider
+    deleteFile()       → Delegates to provider
+    fileExists()       → Delegates to provider
+    checkHealth()      → Delegates to provider
+
+LocalProvider (server/services/storage/local.provider.ts)
+  Role:     Store files on local disk
+  Path:     ./storage/uploads/{objectKey}
+  Security: Blocks path traversal (removes ".." from keys)
+
+SiaS3Provider (server/services/storage/sia-s3.provider.ts)
+  Role:     Store files via renterd S3-compatible API
+  Uses:     @aws-sdk/client-s3 (PutObject, GetObject, DeleteObject, etc.)
+  Config:   All credentials from server-side env vars only
+
+
+================================================================================
+22. UTILITIES AND VALIDATORS
+================================================================================
+
+hash.ts (server/utils/hash.ts)
+  Function: computeSha256(buffer: Buffer): string
+  Uses:     Node.js crypto.createHash("sha256")
+  Returns:  Hex string (64 characters)
+
+response.ts (server/utils/response.ts)
+  jsonSuccess(data, status=200)  → { success: true, data }
+  jsonError(message, status=400)  → { success: false, error: message }
+
+file.schema.ts (server/validators/file.schema.ts)
+  getMaxUploadSizeBytes()    → Reads MAX_UPLOAD_SIZE_MB from env
+  getAllowedExtensions()     → Reads ALLOWED_FILE_TYPES from env
+  getFileExtension(filename) → Extracts extension from filename
+  validateUploadFile(name, size) → Returns { valid, error? }
+
+Validation rules:
+  - File must not be empty (sizeBytes > 0)
+  - File must be <= MAX_UPLOAD_SIZE_MB (default 50 MB)
+  - Extension must be in ALLOWED_FILE_TYPES list
+
+
+================================================================================
+23. REQUEST / RESPONSE FORMAT
+================================================================================
+
+All API responses use this JSON format:
+
+Success:
+  {
+    "success": true,
+    "data": { ... }
+  }
+
+Error:
+  {
+    "success": false,
+    "error": "Human-readable error message"
+  }
+
+HTTP Status Codes:
+  200  OK (list, download, delete, verify, health)
+  201  Created (upload success)
+  400  Bad Request (validation error, upload failed)
+  404  Not Found (file does not exist)
+  500  Internal Server Error (unexpected error)
+  503  Service Unavailable (storage health check failed)
+
+
+================================================================================
+24. SECURITY RULES
+================================================================================
+
+1. Sia credentials NEVER go to the frontend
+   - SIA_S3_ACCESS_KEY and SIA_S3_SECRET_KEY are server-side only
+   - Browser only talks to Next.js API routes
+
+2. Path traversal protection in LocalProvider
+   - objectKey cannot contain ".." to escape the uploads folder
+
+3. File type whitelist
+   - Only allowed extensions can be uploaded (configured in env)
+
+4. File size limit
+   - MAX_UPLOAD_SIZE_MB prevents oversized uploads
+
+5. Soft delete
+   - Deleted files are marked status="deleted", not hard-deleted from DB
+   - File bytes ARE removed from storage on delete
+
+6. Server-only imports
+   - Everything in server/ folder runs on the server only
+   - Never import server/ code from client components
+
+
+================================================================================
+25. SWITCHING BETWEEN LOCAL AND SIA MODE
+================================================================================
+
+To use LOCAL mode (default, no external services needed):
+  .env.local:
+    STORAGE_PROVIDER="local"
+  Restart: npm run dev
+  Files go to: ./storage/uploads/
+
+To use SIA mode (decentralized storage via renterd):
+  Prerequisites:
+    1. renterd installed and running (C:\renterd\renterd.exe --instant)
+    2. S3 API enabled in renterd (port 8080)
+    3. S3 credentials configured
+    4. Wallet funded with Siacoin
+    5. renterd autopilot formed storage contracts (30 hosts for full redundancy)
+
+  .env.local:
+    STORAGE_PROVIDER="sia"
+    SIA_S3_ENDPOINT="http://127.0.0.1:8080"
+    SIA_S3_ACCESS_KEY="your_key"
+    SIA_S3_SECRET_KEY="your_secret"
+    SIA_S3_BUCKET="siabox-mini"
+    SIA_S3_FORCE_PATH_STYLE="true"
+
+  Restart: npm run dev
+
+  NO CODE CHANGES NEEDED — only the env variable changes.
+
+
+================================================================================
+26. renterd SETUP SUMMARY (FOR SIA MODE)
+================================================================================
+
+renterd is the Sia Foundation's renter software. It:
+  - Manages your Siacoin wallet
+  - Forms contracts with storage hosts on the Sia network
+  - Encrypts and distributes your files across hosts
+  - Exposes an S3-compatible API on port 8080
+
+Setup steps (Windows):
+  1. Download renterd_windows_amd64.zip from GitHub releases
+  2. Extract to C:\renterd\
+  3. Run config wizard: .\renterd.exe config
+     - Generate seed, set password, enable S3, auto-generate key pair
+  4. Start with instant sync: .\renterd.exe --instant
+  5. Web UI: http://127.0.0.1:9980
+  6. Fund wallet with Siacoin (SC)
+  7. Wait for autopilot to form 30 storage contracts
+  8. Configure SiaBox Mini .env.local with S3 credentials
+  9. Restart SiaBox Mini: npm run dev
+
+renterd S3 API:
+  - Endpoint: http://127.0.0.1:8080
+  - Uses standard AWS S3 protocol
+  - SiaBox Mini connects via @aws-sdk/client-s3
+
+Important renterd concepts:
+  - Consensus sync: renterd must sync with Sia blockchain before uploads work
+  - Contracts: renterd needs ~30 contracts with hosts before full redundancy
+  - Redundancy: default 30 shards (10 data + 20 parity) across 30 hosts
+  - Autopilot: automatically manages contracts, runs every 30 minutes
+
+
+================================================================================
+27. COMMON ERRORS AND FIXES
+================================================================================
+
+Error: "consensus is not synced"
+  Cause:  renterd blockchain not fully synced
+  Fix:    Start renterd with --instant flag, wait for synced: true
+
+Error: "not enough hosts to support requested upload redundancy"
+  Cause:  renterd has fewer than 30 storage contracts
+  Fix:    Wait for autopilot to form more contracts (check renterd UI)
+          OR lower redundancy in renterd Configuration settings
+
+Error: "File type not allowed"
+  Cause:  Extension not in ALLOWED_FILE_TYPES
+  Fix:    Add extension to .env.local ALLOWED_FILE_TYPES, restart app
+
+Error: "File is too large"
+  Cause:  File exceeds MAX_UPLOAD_SIZE_MB
+  Fix:    Increase MAX_UPLOAD_SIZE_MB in .env.local, restart app
+
+Error: "File exists in database but not in storage"
+  Cause:  Switched storage provider or manually deleted file from disk
+  Fix:    Switch back to original provider, or delete record from Files page
+
+Error: "Sia S3 health check failed"
+  Cause:  renterd not running or wrong S3 endpoint/credentials
+  Fix:    Start renterd, verify SIA_S3_* env vars match renterd config
+
+Error: Prisma "DATABASE_URL not found"
+  Cause:  Missing .env file for Prisma CLI
+  Fix:    Create .env with DATABASE_URL="file:./dev.db"
+
+
+================================================================================
+28. MENTAL MODEL FOR BEGINNERS
+================================================================================
+
+Think of SiaBox Mini like a library system:
+
+  DATABASE (SQLite)     = Library catalog card
+                          (title, author, date, location code)
+                          Does NOT contain the actual book.
+
+  STORAGE (local/Sia)   = The actual bookshelf / warehouse
+                          Contains the real file bytes.
+
+  FileService           = The librarian
+                          Knows how to catalog, retrieve, and remove books.
+
+  StorageService        = The delivery company
+                          Can use local warehouse OR decentralized network.
+
+  StorageProvider       = A specific warehouse
+                          LocalProvider = your basement
+                          SiaS3Provider = worldwide decentralized network
+
+  SHA-256 Hash          = A fingerprint of the book
+                          Proves the book hasn't been changed since cataloged.
+
+When you upload:
+  1. Librarian checks the book is allowed (validation)
+  2. Librarian takes a fingerprint (SHA-256)
+  3. Delivery company stores the book (storage provider)
+  4. Librarian writes a catalog card (database)
+
+When you download:
+  1. Librarian finds the catalog card (database lookup)
+  2. Delivery company fetches the book (storage download)
+  3. You receive the original file
+
+When you verify:
+  1. Delivery company fetches the book again
+  2. Librarian takes a new fingerprint
+  3. Compares with original fingerprint
+  4. Match = book is intact. Mismatch = something changed.
+
+
+================================================================================
+29. QUICK COMMAND REFERENCE
+================================================================================
+
+Install dependencies:
+  npm install
+
+Run database migration:
+  npx prisma migrate dev --name init
+
+Start development server:
+  npm run dev
+
+Build for production:
+  npm run build
+
+Start production server:
+  npm start
+
+Start renterd (Sia mode):
+  cd C:\renterd
+  .\renterd.exe --instant
+
+Check renterd Web UI:
+  http://127.0.0.1:9980
+
+Check SiaBox Mini:
+  http://localhost:3000
+
+Test storage health API:
+  curl http://localhost:3000/api/storage/health
+
+Test list files API:
+  curl http://localhost:3000/api/files
+
+
+================================================================================
+END OF DOCUMENTATION
+================================================================================
+
+For quick setup instructions, see README.md
+For environment variable template, see .env.example
+
+Built with Next.js + TypeScript + Prisma + Tailwind CSS + Sia renterd S3 API
