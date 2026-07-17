@@ -343,40 +343,59 @@ Use this before switching SiaBox Mini to `STORAGE_PROVIDER=sia`:
 
 ## Project structure
 
+The project is split into **frontend/** and **backend/** folders.
+Next.js still needs a thin **app/** folder for routing (required by the App Router).
+Those `app/` files only re-export from `frontend/` and `backend/`.
+
 ```
-app/
-  page.tsx                     ← Home page
-  upload/page.tsx              ← Upload page
-  files/page.tsx               ← Files list page
+frontend/                          ← All UI code
+  pages/
+    home-page.tsx                  ← Home page UI
+    upload-page.tsx                ← Upload page UI
+    files-page.tsx                 ← Files list page UI
+  components/
+    app-shell.tsx                  ← Header / nav / footer
+    file-upload-form.tsx           ← Upload form
+    file-table.tsx                 ← Files table
+    file-actions.tsx               ← Download / Verify / Delete
+    storage-status-card.tsx        ← Storage health indicator
+  styles/
+    globals.css                    ← Tailwind + base styles
+
+backend/                           ← All server / business logic
   api/
-    files/route.ts             ← GET  /api/files (list)
-    files/upload/route.ts      ← POST /api/files/upload
-    files/[fileId]/route.ts    ← DELETE /api/files/[fileId]
-    files/[fileId]/download/route.ts ← GET /api/files/[fileId]/download
-    files/[fileId]/verify/route.ts   ← POST /api/files/[fileId]/verify
-    storage/health/route.ts    ← GET /api/storage/health
-components/
-  file-upload-form.tsx         ← Upload form (client component)
-  file-table.tsx               ← Files table
-  file-actions.tsx             ← Download / Verify / Delete buttons
-  storage-status-card.tsx      ← Storage health indicator
-server/
-  db/prisma.ts                 ← Prisma client singleton
-  services/
-    file.service.ts            ← File business logic
+    files/
+      list.ts                      ← List files handler
+      upload.ts                    ← Upload handler
+      delete.ts                    ← Delete handler
+      download.ts                  ← Download handler
+      verify.ts                    ← Verify (SHA-256) handler
     storage/
-      storage.interface.ts     ← StorageProvider contract
-      storage.service.ts       ← Picks local or sia provider
-      local.provider.ts        ← Files on disk
-      sia-s3.provider.ts       ← Files on Sia via S3 API
+      health.ts                    ← Storage health handler
+  db/prisma.ts                     ← Prisma client singleton
+  services/
+    file.service.ts                ← File business logic
+    storage/
+      storage.interface.ts         ← StorageProvider contract
+      storage.service.ts           ← Picks local or sia provider
+      local.provider.ts            ← Files on disk
+      sia-s3.provider.ts           ← Files on Sia via S3 API
   utils/
-    hash.ts                    ← SHA-256 helper
-    response.ts                ← JSON response helpers
+    hash.ts                        ← SHA-256 helper
+    response.ts                    ← JSON response helpers
   validators/
-    file.schema.ts             ← Upload validation (size, type)
-prisma/schema.prisma           ← FileObject model (SQLite)
-storage/uploads/               ← Local mode file storage
-.env.example                   ← Environment variable template
+    file.schema.ts                 ← Upload validation (size, type)
+
+app/                               ← Thin Next.js routing only (required)
+  layout.tsx                       ← Wires AppShell
+  page.tsx                         ← Re-exports HomePage
+  upload/page.tsx                  ← Re-exports UploadPage
+  files/page.tsx                   ← Re-exports FilesPage
+  api/...                          ← Re-exports backend API handlers
+
+prisma/schema.prisma               ← FileObject model (SQLite)
+storage/uploads/                   ← Local mode file storage
+.env.example                       ← Environment variable template
 ```
 
 ## The key idea to take away

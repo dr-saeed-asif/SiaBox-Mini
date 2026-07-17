@@ -1,9 +1,9 @@
 import { randomUUID } from "crypto";
 import path from "path";
-import { prisma } from "@/server/db/prisma";
-import { getStorageService } from "@/server/services/storage/storage.service";
-import { computeSha256 } from "@/server/utils/hash";
-import { validateUploadFile } from "@/server/validators/file.schema";
+import { prisma } from "@/backend/db/prisma";
+import { getStorageService } from "@/backend/services/storage/storage.service";
+import { computeSha256 } from "@/backend/utils/hash";
+import { validateUploadFile } from "@/backend/validators/file.schema";
 import type { FileObject } from "@prisma/client";
 
 export interface UploadResult {

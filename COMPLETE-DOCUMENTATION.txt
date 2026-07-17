@@ -105,7 +105,7 @@ Storage Backends:
 
 Other:
   - SHA-256 hashing (Node.js crypto module)
-  - Zod-style validation (custom validator in file.schema.ts)
+  - Custom validation helpers (file.schema.ts)
 
 
 ================================================================================
@@ -155,52 +155,56 @@ KEY RULE:
 5. PROJECT FOLDER STRUCTURE (EVERY FILE EXPLAINED)
 ================================================================================
 
+The project is split into frontend/ and backend/.
+Next.js still needs a thin app/ folder for routing (App Router requirement).
+Those app/ files only re-export from frontend/ and backend/.
+
 SiaBox-Mini/
 |
-|-- app/                              Next.js App Router (pages + API)
-|   |-- layout.tsx                    Root layout: header, nav, footer
-|   |-- page.tsx                      Home page with app explanation
-|   |-- globals.css                   Tailwind CSS imports and base styles
-|   |-- upload/
-|   |   |-- page.tsx                  Upload page (uses FileUploadForm)
-|   |-- files/
-|   |   |-- page.tsx                  Files list page (uses FileTable)
+|-- frontend/                         All UI code
+|   |-- pages/
+|   |   |-- home-page.tsx             Home page UI
+|   |   |-- upload-page.tsx           Upload page UI
+|   |   |-- files-page.tsx            Files list page UI
+|   |-- components/
+|   |   |-- app-shell.tsx             Header, nav, footer
+|   |   |-- file-upload-form.tsx      File picker + upload button
+|   |   |-- file-table.tsx            Table of uploaded files
+|   |   |-- file-actions.tsx          Download / Verify / Delete
+|   |   |-- storage-status-card.tsx   Storage health indicator
+|   |-- styles/
+|       |-- globals.css               Tailwind + base styles
+|
+|-- backend/                          All server / business logic
 |   |-- api/
-|       |-- files/
-|       |   |-- route.ts              GET  /api/files         (list files)
-|       |   |-- upload/
-|       |   |   |-- route.ts          POST /api/files/upload   (upload file)
-|       |   |-- [fileId]/
-|       |       |-- route.ts          DELETE /api/files/[id]   (delete file)
-|       |       |-- download/
-|       |       |   |-- route.ts      GET  /api/files/[id]/download
-|       |       |-- verify/
-|       |           |-- route.ts      POST /api/files/[id]/verify
-|       |-- storage/
-|           |-- health/
-|               |-- route.ts          GET  /api/storage/health
-|
-|-- components/                       React client components
-|   |-- file-upload-form.tsx          File picker + upload button + messages
-|   |-- file-table.tsx                Table showing all uploaded files
-|   |-- file-actions.tsx              Download / Verify / Delete buttons
-|   |-- storage-status-card.tsx       Live storage health indicator
-|
-|-- server/                           Backend logic (never imported by browser)
-|   |-- db/
-|   |   |-- prisma.ts                 Prisma client singleton
-|   |-- services/
-|   |   |-- file.service.ts           All file business logic
+|   |   |-- files/
+|   |   |   |-- list.ts               GET  /api/files
+|   |   |   |-- upload.ts             POST /api/files/upload
+|   |   |   |-- delete.ts             DELETE /api/files/[id]
+|   |   |   |-- download.ts           GET  /api/files/[id]/download
+|   |   |   |-- verify.ts             POST /api/files/[id]/verify
 |   |   |-- storage/
-|   |       |-- storage.interface.ts  StorageProvider contract (interface)
-|   |       |-- storage.service.ts  Picks local or sia provider
-|   |       |-- local.provider.ts   Saves files to disk
+|   |       |-- health.ts             GET  /api/storage/health
+|   |-- db/prisma.ts                  Prisma client singleton
+|   |-- services/
+|   |   |-- file.service.ts           File business logic
+|   |   |-- storage/
+|   |       |-- storage.interface.ts StorageProvider contract
+|   |       |-- storage.service.ts Picks local or sia provider
+|   |       |-- local.provider.ts  Saves files to disk
 |   |       |-- sia-s3.provider.ts    Saves files via renterd S3 API
 |   |-- utils/
 |   |   |-- hash.ts                   SHA-256 helper
-|   |   |-- response.ts               JSON success/error response helpers
+|   |   |-- response.ts               JSON success/error helpers
 |   |-- validators/
-|       |-- file.schema.ts            Upload size + file type validation
+|       |-- file.schema.ts            Upload size + type validation
+|
+|-- app/                              Thin Next.js routing only (required)
+|   |-- layout.tsx                    Wires AppShell from frontend
+|   |-- page.tsx                      Re-exports HomePage
+|   |-- upload/page.tsx               Re-exports UploadPage
+|   |-- files/page.tsx                Re-exports FilesPage
+|   |-- api/...                       Re-exports backend API handlers
 |
 |-- prisma/
 |   |-- schema.prisma                 Database model definition
@@ -208,15 +212,12 @@ SiaBox-Mini/
 |   |-- migrations/                   Database migration history
 |
 |-- storage/
-|   |-- uploads/                      Local mode: actual file bytes stored here
-|       |-- .gitkeep
+|   |-- uploads/                      Local mode: actual file bytes
 |
-|-- .env                                Prisma CLI reads DATABASE_URL from here
-|-- .env.local                          Next.js runtime config (copy from .env.example)
-|-- .env.example                        Template for all environment variables
-|-- package.json                        Dependencies and npm scripts
-|-- README.md                           Quick start guide
-|-- COMPLETE-DOCUMENTATION.txt          This file
+|-- .env / .env.local / .env.example
+|-- package.json
+|-- README.md
+|-- COMPLETE-DOCUMENTATION.txt        This file
 
 
 ================================================================================
@@ -255,7 +256,6 @@ File: .env      (for Prisma CLI migrations — needs DATABASE_URL only)
 Variable                  Purpose
 ------------------------  --------------------------------------------------
 APP_NAME                  Display name in browser title and header
-APP_URL                   Base URL of the app (http://localhost:3000)
 DATABASE_URL              SQLite path: file:./dev.db
 STORAGE_PROVIDER          "local" or "sia" — picks storage backend
 LOCAL_STORAGE_PATH        Folder for local file storage (./storage/uploads)
