@@ -34,6 +34,7 @@ export interface StorageProvider {
 
   uploadFile(input: UploadFileInput): Promise<UploadFileResult>;
   downloadFile(objectKey: string): Promise<Buffer>;
+  /** Provider-level byte deletion. Sia disables this operation by policy. */
   deleteFile(objectKey: string): Promise<void>;
   fileExists(objectKey: string): Promise<boolean>;
   checkHealth(): Promise<StorageHealthResult>;

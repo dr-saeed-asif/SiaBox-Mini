@@ -2,7 +2,6 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
-  DeleteObjectCommand,
   HeadObjectCommand,
   HeadBucketCommand,
   CreateBucketCommand,
@@ -27,14 +26,14 @@ export class SiaS3Provider implements StorageProvider {
   private readonly client: S3Client;
   private readonly bucket: string;
 
-  constructor() {
+  constructor(bucket?: string) {
     const endpoint = process.env.SIA_S3_ENDPOINT ?? "http://127.0.0.1:8080";
     const region = process.env.SIA_S3_REGION ?? "us-east-1";
     const accessKey = process.env.SIA_S3_ACCESS_KEY ?? "";
     const secretKey = process.env.SIA_S3_SECRET_KEY ?? "";
     const forcePathStyle = process.env.SIA_S3_FORCE_PATH_STYLE === "true";
 
-    this.bucket = process.env.SIA_S3_BUCKET ?? "siabox-mini";
+    this.bucket = bucket ?? process.env.SIA_S3_BUCKET ?? "siabox-mini";
 
     this.client = new S3Client({
       endpoint,
@@ -75,12 +74,9 @@ export class SiaS3Provider implements StorageProvider {
     return Buffer.from(bytes);
   }
 
-  async deleteFile(objectKey: string): Promise<void> {
-    await this.client.send(
-      new DeleteObjectCommand({
-        Bucket: this.bucket,
-        Key: objectKey,
-      })
+  async deleteFile(_objectKey: string): Promise<void> {
+    throw new Error(
+      "Permanent deletion from Sia is disabled. Remove the local app record instead."
     );
   }
 

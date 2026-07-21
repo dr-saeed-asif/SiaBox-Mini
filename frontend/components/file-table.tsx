@@ -75,7 +75,12 @@ export function FileTable({ files, onRefresh }: FileTableProps) {
               </td>
               <td className="px-4 py-3 text-slate-600">{formatDate(file.createdAt)}</td>
               <td className="px-4 py-3">
-                <FileActions fileId={file.id} fileName={file.originalName} onRefresh={onRefresh} />
+                <FileActions
+                  fileId={file.id}
+                  fileName={file.originalName}
+                  storageProvider={file.storageProvider}
+                  onRefresh={onRefresh}
+                />
               </td>
             </tr>
           ))}

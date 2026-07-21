@@ -38,8 +38,8 @@ export default function FilesPage() {
           <h1 className="text-2xl font-bold text-slate-900">Your Files</h1>
           <p className="mt-2 text-slate-600">
             All uploaded files are listed below. Use Download to get a copy,
-            Verify to check the SHA-256 hash, or Delete to remove a file from
-            storage.
+            Verify to check the SHA-256 hash, or Remove locally to hide a Sia
+            file from this app without deleting its cloud copy.
           </p>
         </div>
         <div className="flex gap-2">

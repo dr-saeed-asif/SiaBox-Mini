@@ -11,7 +11,7 @@ export default function HomePage() {
         <p className="mt-4 text-lg text-slate-600 leading-relaxed">
           SiaBox Mini is a simple file storage app built to teach you how
           decentralized storage works. Upload files, list them, download them,
-          delete them, and verify their integrity — all through a clean web
+          remove them locally, and verify their integrity — all through a clean web
           interface.
         </p>
         <p className="mt-3 text-slate-600 leading-relaxed">
@@ -47,7 +47,7 @@ export default function HomePage() {
             View Files
           </h2>
           <p className="mt-2 text-sm text-slate-600">
-            See all uploaded files in a table. Download, verify, or delete any
+            See all uploaded files in a table. Download, verify, or remove any
             file with one click.
           </p>
         </Link>
@@ -59,7 +59,8 @@ export default function HomePage() {
           <li>You upload a file through the web UI.</li>
           <li>The backend validates it, computes a SHA-256 hash, and saves metadata to SQLite.</li>
           <li>The file bytes go to a storage provider (local folder or Sia S3).</li>
-          <li>You can download, verify (re-check the hash), or delete the file anytime.</li>
+          <li>You can download, verify (re-check the hash), or remove the file locally anytime.</li>
+          <li>Removing a Sia file keeps its encrypted cloud object intact.</li>
         </ol>
       </section>
     </div>

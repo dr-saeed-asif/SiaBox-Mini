@@ -166,11 +166,12 @@ SiaBox-Mini/
 |   |   |-- home-page.tsx             Home page UI
 |   |   |-- upload-page.tsx           Upload page UI
 |   |   |-- files-page.tsx            Files list page UI
+|   |   |-- recover-page.tsx          Recovery key / JSON import UI
 |   |-- components/
 |   |   |-- app-shell.tsx             Header, nav, footer
 |   |   |-- file-upload-form.tsx      File picker + upload button
 |   |   |-- file-table.tsx            Table of uploaded files
-|   |   |-- file-actions.tsx          Download / Verify / Delete
+|   |   |-- file-actions.tsx          Download / Verify / protected removal
 |   |   |-- storage-status-card.tsx   Storage health indicator
 |   |-- styles/
 |       |-- globals.css               Tailwind + base styles
@@ -182,6 +183,8 @@ SiaBox-Mini/
 |   |   |   |-- upload.ts             POST /api/files/upload
 |   |   |   |-- delete.ts             DELETE /api/files/[id]
 |   |   |   |-- download.ts           GET  /api/files/[id]/download
+|   |   |   |-- recovery-key.ts       Issue one-time recovery key
+|   |   |   |-- recover.ts            Restore removed Sia record
 |   |   |   |-- verify.ts             POST /api/files/[id]/verify
 |   |   |-- storage/
 |   |       |-- health.ts             GET  /api/storage/health
@@ -195,6 +198,7 @@ SiaBox-Mini/
 |   |       |-- sia-s3.provider.ts    Saves files via renterd S3 API
 |   |-- utils/
 |   |   |-- hash.ts                   SHA-256 helper
+|   |   |-- recovery-key.ts           Secure recovery key helpers
 |   |   |-- response.ts               JSON success/error helpers
 |   |-- validators/
 |       |-- file.schema.ts            Upload size + type validation
@@ -294,6 +298,9 @@ storageProvider   String    "local" or "sia" — which backend stored it
 bucket            String    Storage bucket name ("local" or "siabox-mini")
 objectKey         String    Unique key/path in storage (UUID + extension)
 status            String    "active" or "deleted" (soft delete)
+recoveryKeyHash   String?   SHA-256 of the one-time recovery key
+recoveryKeyCreatedAt DateTime? When the current key was issued
+removedAt         DateTime? When the file was removed locally
 createdAt         DateTime  When file was uploaded
 updatedAt         DateTime  Last update time
 
@@ -336,7 +343,7 @@ must follow:
     readonly name: string;           // "local" or "sia"
     uploadFile(input): Promise<...>  // Save file bytes
     downloadFile(objectKey): Promise<Buffer>  // Read file bytes
-    deleteFile(objectKey): Promise<void>     // Remove file bytes
+    deleteFile(objectKey): Promise<void>     // Provider operation; disabled for Sia
     fileExists(objectKey): Promise<boolean>    // Check if file exists
     checkHealth(): Promise<...>      // Is storage backend reachable?
   }
@@ -552,7 +559,7 @@ Step 4: Response
 
 Step 5: FileTable component renders the data
   - Shows table with: name, size, MIME type, provider, date, actions
-  - Each row has Download / Verify / Delete buttons (FileActions component)
+  - Each row has Download / Verify / Remove locally buttons (FileActions component)
 
 
 ================================================================================
@@ -589,25 +596,42 @@ Step 5: Browser saves file to user's Downloads folder
 15. COMPLETE DELETE FLOW
 ================================================================================
 
-USER ACTION: User clicks "Delete" button and confirms the dialog
+USER ACTION: User clicks "Remove locally" and confirms the dialog
 
 Step 1: FileActions.handleDelete()
-  - Shows confirm dialog: 'Delete "filename"? This cannot be undone.'
-  - Sends DELETE /api/files/{fileId}
+  - Calls POST /api/files/{fileId}/recovery-key
+  - Shows the SBX1_ recovery key in a modal
+  - Requires Copy key or Download recovery file before continuing
+  - Sends DELETE /api/files/{fileId} with the recovery key
 
 Step 2: DELETE /api/files/[fileId]/route.ts
-  - Calls getFileService().deleteFile(fileId)
+  - Calls getFileService().deleteFile(fileId, recoveryKey)
 
 Step 3: FileService.deleteFile()
   3a. Looks up file in database
-  3b. Deletes bytes from storage: storage.deleteFile(objectKey)
-  3c. Soft-deletes in database: status = "deleted"
+  3b. For Sia: verifies the key hash and confirms the cloud object exists
+      It does NOT delete cloud bytes
+      For local provider: deletes bytes from ./storage/uploads
+  3c. Soft-deletes local metadata: status = "deleted"
       (record stays in DB but hidden from list)
 
-Step 4: Response
-  { "success": true, "data": { "message": "File deleted successfully." } }
+Step 4: Response includes cloudCopyRetained and a human-readable message
 
 Step 5: FileActions calls onRefresh() → file list reloads
+
+
+================================================================================
+15A. COMPLETE RECOVERY FLOW
+================================================================================
+
+USER ACTION: User opens Recover and pastes an SBX1_ key or imports JSON
+
+Step 1: RecoverPage sends POST /api/files/recover with recoveryKey
+Step 2: FileService hashes the submitted key and finds the deleted record
+Step 3: StorageService confirms the original Sia bucket/object still exists
+Step 4: FileService changes status to "active" and clears removedAt
+Step 5: The used recovery key hash is cleared, making the key one-time use
+Step 6: The recovered file appears in Files and can be downloaded/verified
 
 
 ================================================================================
@@ -720,9 +744,14 @@ Component: FileTable (components/file-table.tsx)
 
 Component: FileActions (components/file-actions.tsx)
   Type:     Client Component
-  Props:    fileId, fileName, onRefresh()
-  Does:     Download, Verify, Delete API calls
-  Shows:    Three action buttons, verify result message
+  Props:    fileId, fileName, storageProvider, onRefresh()
+  Does:     Download, Verify, recovery-key issue, protected removal
+  Shows:    Action buttons, verify result, recovery-key modal
+
+Component: RecoverPage (pages/recover-page.tsx)
+  Type:     Client Component
+  Does:     Accepts an SBX1_ key or imports .siabox-recovery.json
+  Shows:    Recovery success/error and a link back to Files
 
 Component: StorageStatusCard (components/storage-status-card.tsx)
   Type:     Client Component
@@ -744,6 +773,8 @@ Route                          Method  File                              Action
 /api/files                     GET     app/api/files/route.ts            List all files
 /api/files/upload              POST    app/api/files/upload/route.ts     Upload file
 /api/files/[fileId]            DELETE  app/api/files/[fileId]/route.ts   Delete file
+/api/files/[fileId]/recovery-key POST  app/api/files/[fileId]/recovery-key Issue key
+/api/files/recover             POST    app/api/files/recover/route.ts    Recover file
 /api/files/[fileId]/download   GET     app/api/files/[fileId]/download/  Download bytes
 /api/files/[fileId]/verify     POST    app/api/files/[fileId]/verify/    Verify hash
 /api/storage/health            GET     app/api/storage/health/route.ts   Storage health
@@ -763,7 +794,9 @@ FileService (server/services/file.service.ts)
     uploadFile()    → Validate → Hash → Store → Save metadata
     getFileById()   → Find single file by ID
     downloadFile()  → Get metadata + read bytes from storage
-    deleteFile()    → Remove from storage + soft-delete in DB
+    createRecoveryKey() → Verify Sia object + issue/store hashed key
+    deleteFile()    → Retain Sia bytes + soft-delete local metadata
+    recoverFile()   → Verify key/object + reactivate metadata
     verifyFile()    → Download + re-hash + compare
 
 StorageService (server/services/storage/storage.service.ts)
@@ -771,9 +804,9 @@ StorageService (server/services/storage/storage.service.ts)
   Methods:
     getProviderName()  → "local" or "sia"
     uploadFile()       → Delegates to provider
-    downloadFile()     → Delegates to provider
-    deleteFile()       → Delegates to provider
-    fileExists()       → Delegates to provider
+    downloadFile()     → Uses the provider stored on the file record
+    deleteLocalFile()  → Deletes on-disk bytes only; Sia is not exposed
+    fileExists()       → Uses the provider stored on the file record
     checkHealth()      → Delegates to provider
 
 LocalProvider (server/services/storage/local.provider.ts)
@@ -783,7 +816,8 @@ LocalProvider (server/services/storage/local.provider.ts)
 
 SiaS3Provider (server/services/storage/sia-s3.provider.ts)
   Role:     Store files via renterd S3-compatible API
-  Uses:     @aws-sdk/client-s3 (PutObject, GetObject, DeleteObject, etc.)
+  Uses:     @aws-sdk/client-s3 (PutObject, GetObject, HeadObject, etc.)
+  Safety:   Permanent Sia deletion is disabled
   Config:   All credentials from server-side env vars only
 
 
@@ -858,7 +892,15 @@ HTTP Status Codes:
 
 5. Soft delete
    - Deleted files are marked status="deleted", not hard-deleted from DB
-   - File bytes ARE removed from storage on delete
+   - Sia file bytes are retained in the cloud
+   - Local-provider file bytes are removed from disk
+
+6. One-time recovery keys
+   - Generated with 256 bits of cryptographic randomness
+   - Plaintext key is shown to the user but never stored in SQLite
+   - Only a SHA-256 hash is stored and excluded from list responses
+   - Sia removal is rejected without the matching key
+   - Successful recovery invalidates the used key
 
 6. Server-only imports
    - Everything in server/ folder runs on the server only

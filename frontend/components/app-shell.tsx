@@ -27,6 +27,9 @@ export function AppShell({ children, appName }: AppShellProps) {
             <Link href="/files" className="text-slate-600 hover:text-indigo-600">
               Files
             </Link>
+            <Link href="/recover" className="text-slate-600 hover:text-indigo-600">
+              Recover
+            </Link>
           </nav>
         </div>
       </header>

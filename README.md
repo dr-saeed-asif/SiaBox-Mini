@@ -1,6 +1,6 @@
 # SiaBox Mini — Simple Decentralized File Storage App
 
-A beginner-friendly Next.js project that teaches you how to upload, list, download, delete, and verify files using a clean storage abstraction. It works out of the box with **local storage** (files on your disk) and can be switched to **Sia decentralized storage** with a single environment variable.
+A beginner-friendly Next.js project that teaches you how to upload, list, download, remove, and verify files using a clean storage abstraction. New uploads are configured for **Sia decentralized storage**, while local mode remains available for development.
 
 ---
 
@@ -8,7 +8,7 @@ A beginner-friendly Next.js project that teaches you how to upload, list, downlo
 
 SiaBox Mini is a small full-stack app with:
 
-- A web UI to upload, list, download, verify, and delete files
+- A web UI to upload, list, download, verify, and remove files locally
 - A SQLite database (via Prisma) that stores file metadata
 - A storage abstraction layer that can save file bytes either:
   - on your local disk (`local` mode), or
@@ -45,7 +45,8 @@ When `STORAGE_PROVIDER=sia`:
 
 1. Same upload flow, but instead of writing to disk, the backend uses the **AWS S3 SDK** to send the file to **renterd's S3-compatible API**.
 2. renterd then encrypts the file and distributes it across Sia hosts.
-3. Downloads, deletes, and existence checks go through the same S3 API.
+3. Downloads and existence checks use the provider recorded with each file.
+4. Removing a Sia file only hides its local SQLite record; the Sia cloud object is retained.
 
 The app code doesn't change at all — only the provider behind the `StorageProvider` interface changes. That is the whole point of the storage abstraction:
 
@@ -66,7 +67,7 @@ Copy-Item .env.example .env.local
 cp .env.example .env.local
 ```
 
-The defaults work for local mode. Prisma also reads `DATABASE_URL`, which is included in `.env.example`.
+The example targets Sia mode. Fill in the renterd S3 credentials before starting, or explicitly set `STORAGE_PROVIDER="local"` for on-disk development. Prisma also reads `DATABASE_URL`, which is included in `.env.example`.
 
 > Note: Prisma CLI reads `.env` (not `.env.local`), so also create a plain `.env` with `DATABASE_URL="file:./dev.db"` for migrations. Next.js itself reads `.env.local` at runtime.
 
@@ -85,7 +86,7 @@ This creates `prisma/dev.db` (SQLite) with the `FileObject` table.
 npm run dev
 ```
 
-Open http://localhost:3000 — you should see the home page with a green "Storage: local — Online" status card.
+Open http://localhost:3000 — you should see the home page with a green storage status card for the configured provider.
 
 ## 8. How to switch from local to Sia
 
@@ -105,7 +106,13 @@ SIA_S3_FORCE_PATH_STYLE="true"
 3. Restart the Next.js dev server (`npm run dev`).
 4. Open the home page — the status card should say **Storage: sia — Online**.
 
-New uploads will go to Sia. In this simple app, downloads always use the *current* provider, so switch back to `STORAGE_PROVIDER=local` if you need to retrieve files that were uploaded in local mode.
+New uploads will go to Sia. Downloads and verification use each database record's original provider, so older local records continue to work after switching to Sia.
+
+When you click **Remove locally** on a Sia file, the app first creates a 256-bit one-time recovery key. You must copy the key or download its `.siabox-recovery.json` file before removal is enabled. The app then marks its SQLite metadata as deleted and hides it from the active file list. It never sends a Sia `DeleteObject` request, so the cloud copy remains intact. Local-provider files are still deleted from `storage/uploads`.
+
+To restore a removed Sia file, open **Recover**, paste the `SBX1_...` key or import the recovery JSON file, and click **Recover File**. The backend hashes the submitted key, finds the retained metadata, verifies that the Sia object still exists, and returns the record to the active file list. A successfully used recovery key is invalidated; the next removal issues a new key.
+
+Only the SHA-256 hash of the recovery key is stored in SQLite. The plaintext key is shown once and is never included in the file-list API. A recovery key is not a renterd wallet seed or S3 credential and does not expose either secret.
 
 ---
 
@@ -335,7 +342,7 @@ Use this before switching SiaBox Mini to `STORAGE_PROVIDER=sia`:
 | `403 Forbidden` / `InvalidAccessKeyId` from Sia | Wrong S3 credentials | Match `SIA_S3_ACCESS_KEY` / `SIA_S3_SECRET_KEY` to the keys from `renterd.exe config` |
 | Upload rejected: "File type not allowed" | Extension not in whitelist | Add the extension to `ALLOWED_FILE_TYPES` in `.env.local` and restart |
 | Upload rejected: "File is too large" | File exceeds limit | Raise `MAX_UPLOAD_SIZE_MB` in `.env.local` and restart |
-| "File exists in database but not in storage" | You switched providers, or deleted the file manually from disk | Switch back to the original provider, or delete the record from the Files page |
+| "File exists in database but not in storage" | The file was manually removed from its original provider, or that provider is unavailable | Restore the original file/provider connection, then retry |
 | Uploads to Sia fail with `NoSuchBucket` | Bucket doesn't exist in renterd | Health check may auto-create it; otherwise create bucket `siabox-mini` in the renterd UI |
 | Autopilot still shows 0 contracts after funding | Autopilot loop last ran before deposit | Keep renterd running, or restart renterd and wait for the next contract formation cycle |
 
@@ -353,11 +360,12 @@ frontend/                          ← All UI code
     home-page.tsx                  ← Home page UI
     upload-page.tsx                ← Upload page UI
     files-page.tsx                 ← Files list page UI
+    recover-page.tsx               ← Recovery key / JSON import UI
   components/
     app-shell.tsx                  ← Header / nav / footer
     file-upload-form.tsx           ← Upload form
     file-table.tsx                 ← Files table
-    file-actions.tsx               ← Download / Verify / Delete
+    file-actions.tsx               ← Download / Verify / protected local removal
     storage-status-card.tsx        ← Storage health indicator
   styles/
     globals.css                    ← Tailwind + base styles
@@ -369,6 +377,8 @@ backend/                           ← All server / business logic
       upload.ts                    ← Upload handler
       delete.ts                    ← Delete handler
       download.ts                  ← Download handler
+      recovery-key.ts              ← Issue a one-time recovery key
+      recover.ts                   ← Restore a removed Sia record
       verify.ts                    ← Verify (SHA-256) handler
     storage/
       health.ts                    ← Storage health handler
@@ -382,6 +392,7 @@ backend/                           ← All server / business logic
       sia-s3.provider.ts           ← Files on Sia via S3 API
   utils/
     hash.ts                        ← SHA-256 helper
+    recovery-key.ts                ← Generate, hash, and compare recovery keys
     response.ts                    ← JSON response helpers
   validators/
     file.schema.ts                 ← Upload validation (size, type)
@@ -390,6 +401,7 @@ app/                               ← Thin Next.js routing only (required)
   layout.tsx                       ← Wires AppShell
   page.tsx                         ← Re-exports HomePage
   upload/page.tsx                  ← Re-exports UploadPage
+  recover/page.tsx                 ← Re-exports RecoverPage
   files/page.tsx                   ← Re-exports FilesPage
   api/...                          ← Re-exports backend API handlers
 

@@ -13,15 +13,18 @@ datasource db {
 // FileObject stores metadata about every uploaded file.
 // The actual file bytes live in storage (local folder or Sia S3 bucket).
 model FileObject {
-  id              String   @id @default(cuid())
-  originalName    String
-  mimeType        String
-  sizeBytes       Int
-  sha256Hash      String
-  storageProvider String   // "local" or "sia"
-  bucket          String
-  objectKey       String   @unique
-  status          String   @default("active") // active | deleted
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
+  id                   String    @id @default(cuid())
+  originalName         String
+  mimeType             String
+  sizeBytes            Int
+  sha256Hash           String
+  storageProvider      String // "local" or "sia"
+  bucket               String
+  objectKey            String    @unique
+  status               String    @default("active") // active | deleted (hidden locally; Sia bytes retained)
+  recoveryKeyHash      String?   @unique
+  recoveryKeyCreatedAt DateTime?
+  removedAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
 }
