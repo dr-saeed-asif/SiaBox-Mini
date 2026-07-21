@@ -182,8 +182,8 @@ export function FileActions({
           {loading === "delete" || loading === "recovery"
             ? "..."
             : storageProvider === "sia"
-              ? "Remove locally"
-              : "Delete local"}
+              ? "Remove"
+              : "Delete"}
         </button>
       </div>
       {verifyMessage && (
@@ -249,7 +249,7 @@ export function FileActions({
                 disabled={!recoverySaved || loading === "delete"}
                 className="rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
-                {loading === "delete" ? "Removing..." : "I saved it — Remove locally"}
+                {loading === "delete" ? "Removing..." : "I saved it — Remove"}
               </button>
             </div>
             {!recoverySaved && (
